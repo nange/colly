@@ -540,7 +540,9 @@ func (c *Collector) scrape(u, method string, depth int, requestData io.Reader, c
 	c.wg.Add(1)
 	r := c.getMatchingRule(req.URL.Host)
 	if r != nil {
+		fmt.Println("before waitchain======", req.URL.Host)
 		r.waitChan <- true
+		fmt.Println("after waitchain======", req.URL.Host)
 	}
 	if c.Async {
 		go c.fetch(u, method, depth, requestData, ctx, hdr, req, r)
