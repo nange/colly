@@ -543,10 +543,10 @@ func (c *Collector) scrape(u, method string, depth int, requestData io.Reader, c
 		r.waitChan <- true
 	}
 	if c.Async {
-		go c.fetch(u, method, depth, requestData, ctx, hdr, req)
+		go c.fetch(u, method, depth, requestData, ctx, hdr, req, r)
 		return nil
 	}
-	return c.fetch(u, method, depth, requestData, ctx, hdr, req)
+	return c.fetch(u, method, depth, requestData, ctx, hdr, req, r)
 }
 
 func setRequestBody(req *http.Request, body io.Reader) {
@@ -595,9 +595,8 @@ func (c *Collector) getMatchingRule(domain string) *LimitRule {
 	return nil
 }
 
-func (c *Collector) fetch(u, method string, depth int, requestData io.Reader, ctx *Context, hdr http.Header, req *http.Request) error {
+func (c *Collector) fetch(u, method string, depth int, requestData io.Reader, ctx *Context, hdr http.Header, req *http.Request, r *LimitRule) error {
 	defer c.wg.Done()
-	r := c.getMatchingRule(req.URL.Host)
 	if r != nil {
 		defer func(r *LimitRule) {
 			randomDelay := time.Duration(0)
