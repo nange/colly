@@ -26,6 +26,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	mrand "math/rand"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -117,6 +118,7 @@ type Collector struct {
 	requestCount      uint32
 	responseCount     uint32
 	backend           *httpBackend
+	limitRules        []*LimitRule
 	wg                *sync.WaitGroup
 	lock              *sync.RWMutex
 }
@@ -536,6 +538,10 @@ func (c *Collector) scrape(u, method string, depth int, requestData io.Reader, c
 	setRequestBody(req, requestData)
 	u = parsedURL.String()
 	c.wg.Add(1)
+	r := c.getMatchingRule(req.URL.Host)
+	if r != nil {
+		r.waitChan <- true
+	}
 	if c.Async {
 		go c.fetch(u, method, depth, requestData, ctx, hdr, req)
 		return nil
@@ -575,8 +581,34 @@ func setRequestBody(req *http.Request, body io.Reader) {
 	}
 }
 
+func (c *Collector) getMatchingRule(domain string) *LimitRule {
+	if c.limitRules == nil {
+		return nil
+	}
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	for _, r := range c.limitRules {
+		if r.Match(domain) {
+			return r
+		}
+	}
+	return nil
+}
+
 func (c *Collector) fetch(u, method string, depth int, requestData io.Reader, ctx *Context, hdr http.Header, req *http.Request) error {
 	defer c.wg.Done()
+	r := c.getMatchingRule(req.URL.Host)
+	if r != nil {
+		defer func(r *LimitRule) {
+			randomDelay := time.Duration(0)
+			if r.RandomDelay != 0 {
+				randomDelay = time.Duration(mrand.Int63n(int64(r.RandomDelay)))
+			}
+			time.Sleep(r.Delay + randomDelay)
+			<-r.waitChan
+		}(r)
+	}
+
 	if ctx == nil {
 		ctx = NewContext()
 	}
@@ -1083,7 +1115,13 @@ func (c *Collector) handleOnScraped(r *Response) {
 
 // Limit adds a new LimitRule to the collector
 func (c *Collector) Limit(rule *LimitRule) error {
-	return c.backend.Limit(rule)
+	c.lock.Lock()
+	if c.limitRules == nil {
+		c.limitRules = make([]*LimitRule, 0, 8)
+	}
+	c.limitRules = append(c.limitRules, rule)
+	c.lock.Unlock()
+	return rule.Init()
 }
 
 // Limits adds new LimitRules to the collector
