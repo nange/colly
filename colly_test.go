@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 
@@ -348,6 +349,36 @@ func TestCollectorVisit(t *testing.T) {
 	if !onScrapedCalled {
 		t.Error("Failed to call OnScraped callback")
 	}
+}
+
+func TestCollectorVisitWithLimit(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+	go func() {
+		fmt.Println("start pprof========")
+		fmt.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+	time.Sleep(time.Second * 3)
+	c := NewCollector(Async(true))
+	c.Limit(&LimitRule{
+		DomainGlob:  "*",
+		Parallelism: 5,
+	})
+	c.OnResponse(func(response *Response) {
+		fmt.Println("response body len:", len(response.Body))
+	})
+	c.OnHTML(`a[href]`, func(e *HTMLElement) {
+		href := e.Attr("href")
+		if href == "" || strings.HasPrefix(href, "javascript") || strings.HasPrefix(href, "#") {
+			return
+		}
+		e.Request.Visit(href)
+	})
+
+	c.Visit("http://news.baidu.com")
+
+	c.Wait()
+	t.Log("completed...")
 }
 
 func TestCollectorVisitWithAllowedDomains(t *testing.T) {

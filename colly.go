@@ -540,9 +540,7 @@ func (c *Collector) scrape(u, method string, depth int, requestData io.Reader, c
 	c.wg.Add(1)
 	r := c.getMatchingRule(req.URL.Host)
 	if r != nil {
-		fmt.Println("before waitchain======", req.URL.Host)
 		r.waitChan <- true
-		fmt.Println("after waitchain======", req.URL.Host)
 	}
 	if c.Async {
 		go c.fetch(u, method, depth, requestData, ctx, hdr, req, r)
@@ -597,18 +595,26 @@ func (c *Collector) getMatchingRule(domain string) *LimitRule {
 	return nil
 }
 
+func (c *Collector) checkLimitRule(hostname string) {
+	r := c.getMatchingRule(hostname)
+	if r == nil {
+		return
+	}
+
+	randomDelay := time.Duration(0)
+	if r.RandomDelay != 0 {
+		randomDelay = time.Duration(mrand.Int63n(int64(r.RandomDelay)))
+	}
+	totalDely := r.Delay + randomDelay
+	if totalDely > 0 {
+		time.Sleep(totalDely)
+	}
+
+	<-r.waitChan
+}
+
 func (c *Collector) fetch(u, method string, depth int, requestData io.Reader, ctx *Context, hdr http.Header, req *http.Request, r *LimitRule) error {
 	defer c.wg.Done()
-	if r != nil {
-		defer func(r *LimitRule) {
-			randomDelay := time.Duration(0)
-			if r.RandomDelay != 0 {
-				randomDelay = time.Duration(mrand.Int63n(int64(r.RandomDelay)))
-			}
-			time.Sleep(r.Delay + randomDelay)
-			<-r.waitChan
-		}(r)
-	}
 
 	if ctx == nil {
 		ctx = NewContext()
@@ -643,6 +649,7 @@ func (c *Collector) fetch(u, method string, depth int, requestData io.Reader, ct
 	if proxyURL, ok := req.Context().Value(ProxyURLKey).(string); ok {
 		request.ProxyURL = proxyURL
 	}
+	c.checkLimitRule(req.URL.Hostname())
 	if err := c.handleOnError(response, err, request, ctx); err != nil {
 		return err
 	}
